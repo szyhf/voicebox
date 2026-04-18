@@ -92,6 +92,8 @@ def _configure_cors(application: FastAPI) -> None:
         "tauri://localhost",  # Tauri webview (macOS)
         "https://tauri.localhost",  # Tauri webview (Windows/Linux)
         "http://tauri.localhost",  # Tauri webview (Windows, some builds)
+        "http://localhost:5174",  # Demo dev server
+        "http://127.0.0.1:5174",
     ]
     env_origins = os.environ.get("VOICEBOX_CORS_ORIGINS", "")
     all_origins = default_origins + [o.strip() for o in env_origins.split(",") if o.strip()]

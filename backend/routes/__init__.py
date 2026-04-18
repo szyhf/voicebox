@@ -30,3 +30,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(models_router)
     app.include_router(tasks_router)
     app.include_router(cuda_router)
+
+    # Educational demo
+    from .demo import router as demo_router
+    app.include_router(demo_router)
