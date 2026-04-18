@@ -248,6 +248,28 @@ build-web:
 build-web:
     Set-Location "{{ web_dir }}"; bun run build
 
+# Build demo binary (onedir + demo frontend + model + zip)
+[unix]
+build-demo: _ensure-venv
+    cd demo && bun install && bun run build
+    PATH="{{ venv_bin }}:$PATH" {{ python }} backend/build_binary.py --demo
+
+[windows]
+build-demo: _ensure-venv
+    Set-Location "demo"; bun install; bun run build
+    $env:PATH = "{{ venv_bin }};$env:PATH"; & "{{ python }}" backend/build_binary.py --demo
+
+# Build demo binary without model (smaller zip, users bring their own model)
+[unix]
+build-demo-lite: _ensure-venv
+    cd demo && bun install && bun run build
+    PATH="{{ venv_bin }}:$PATH" {{ python }} backend/build_binary.py --demo --no-model
+
+[windows]
+build-demo-lite: _ensure-venv
+    Set-Location "demo"; bun install; bun run build
+    $env:PATH = "{{ venv_bin }};$env:PATH"; & "{{ python }}" backend/build_binary.py --demo --no-model
+
 # ─── Code Quality ────────────────────────────────────────────────────
 
 # Run all checks (JS + Python lint + format)

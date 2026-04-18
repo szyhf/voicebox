@@ -4,6 +4,7 @@ PyInstaller build script for creating standalone Python server binary.
 Usage:
     python build_binary.py           # Build default (CPU) server binary
     python build_binary.py --cuda    # Build CUDA-enabled server binary
+    python build_binary.py --demo    # Build demo binary (onedir + bundled model)
 """
 
 import PyInstaller.__main__
@@ -22,24 +23,28 @@ def is_apple_silicon():
     return platform.system() == "Darwin" and platform.machine() == "arm64"
 
 
-def build_server(cuda=False):
+def build_server(cuda=False, demo=False, demo_no_model=False):
     """Build Python server as standalone binary.
 
     Args:
         cuda: If True, build with CUDA support and name the binary
               voicebox-server-cuda instead of voicebox-server.
+        demo: If True, build demo mode: onedir, include demo frontend,
+              copy model files, and create zip archive.
+        demo_no_model: If True with --demo, skip copying model files.
     """
     backend_dir = Path(__file__).parent
+    project_root = backend_dir.parent
 
-    binary_name = "voicebox-server-cuda" if cuda else "voicebox-server"
+    if demo:
+        binary_name = "voicebox-demo"
+    elif cuda:
+        binary_name = "voicebox-server-cuda"
+    else:
+        binary_name = "voicebox-server"
 
-    # PyInstaller arguments
-    # CUDA builds use --onedir so we can split the output into two archives:
-    #   1. Server core (~200-400MB) — versioned with the app
-    #   2. CUDA libs (~2GB) — versioned independently (only redownloaded on
-    #      CUDA toolkit / torch major version changes)
-    # CPU builds remain --onefile for simplicity.
-    pack_mode = "--onedir" if cuda else "--onefile"
+    # CUDA builds and demo builds use --onedir; CPU builds remain --onefile.
+    pack_mode = "--onedir" if (cuda or demo) else "--onefile"
     args = [
         "server.py",  # Use server.py as entry point instead of main.py
         pack_mode,
@@ -363,6 +368,16 @@ def build_server(cuda=False):
     elif not cuda:
         logger.info("Building for non-Apple Silicon platform - PyTorch only")
 
+    # Demo mode: include demo frontend static files
+    if demo:
+        demo_dist = project_root / "demo" / "dist"
+        if demo_dist.is_dir():
+            args.extend(["--add-data", f"{demo_dist}{os.pathsep}demo_dist"])
+            logger.info("Demo mode: including demo frontend from %s", demo_dist)
+        else:
+            logger.error("Demo mode requires demo/dist/ — run 'cd demo && bun run build' first")
+            sys.exit(1)
+
     dist_dir = str(backend_dir / "dist")
     build_dir = str(backend_dir / "build")
 
@@ -440,6 +455,64 @@ def build_server(cuda=False):
 
     logger.info("Binary built in %s", backend_dir / "dist" / binary_name)
 
+    # Demo post-build: create zip (with or without model)
+    if demo:
+        _package_demo(backend_dir / "dist" / binary_name, include_model=not demo_no_model)
+
+
+def _package_demo(output_dir: Path, include_model: bool = True) -> None:
+    """Create a zip archive of the demo distribution.
+
+    Args:
+        output_dir: The onedir output directory from PyInstaller.
+        include_model: If True, copy Qwen3-TTS model into the distribution.
+    """
+    import shutil
+
+    if include_model:
+        models_src = _find_qwen_model_cache()
+        models_dst = output_dir / "models"
+
+        if models_src:
+            models_dst.mkdir(parents=True, exist_ok=True)
+            dst_repo = models_dst / models_src.name
+            if dst_repo.exists():
+                shutil.rmtree(dst_repo)
+            shutil.copytree(models_src, dst_repo)
+            logger.info("Demo: copied model from %s to %s", models_src, dst_repo)
+        else:
+            logger.warning(
+                "Demo: Qwen3-TTS model not found in HF cache. "
+                "The zip will not include model files — users must download separately."
+            )
+    else:
+        logger.info("Demo: skipping model (--no-model flag)")
+
+    # Create zip archive
+    zip_name = "voicebox-demo"
+    logger.info("Demo: creating zip archive %s.zip ...", zip_name)
+    shutil.make_archive(
+        base_name=str(output_dir.parent / zip_name),
+        format="zip",
+        root_dir=str(output_dir),
+    )
+    zip_path = output_dir.parent / f"{zip_name}.zip"
+    size_mb = zip_path.stat().st_size / (1024 * 1024)
+    logger.info("Demo: zip created at %s (%.0f MB)", zip_path, size_mb)
+
+
+def _find_qwen_model_cache() -> Path | None:
+    """Locate the Qwen3-TTS 1.7B model in the HuggingFace Hub cache."""
+    from huggingface_hub import constants as hf_constants
+
+    cache_dir = Path(hf_constants.HF_HUB_CACHE)
+    # Try the standard PyTorch model ID
+    for repo_name in ["Qwen--Qwen3-TTS-12Hz-1.7B-Base", "Qwen--Qwen3-TTS-1.7B"]:
+        repo_dir = cache_dir / f"models--{repo_name}"
+        if repo_dir.is_dir():
+            return repo_dir
+    return None
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build voicebox-server binary")
@@ -448,5 +521,16 @@ if __name__ == "__main__":
         action="store_true",
         help="Build CUDA-enabled binary (voicebox-server-cuda)",
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Build demo binary (onedir + demo frontend + zip)",
+    )
+    parser.add_argument(
+        "--no-model",
+        action="store_true",
+        dest="no_model",
+        help="With --demo, skip bundling model files (users provide their own)",
+    )
     cli_args = parser.parse_args()
-    build_server(cuda=cli_args.cuda)
+    build_server(cuda=cli_args.cuda, demo=cli_args.demo, demo_no_model=cli_args.no_model)

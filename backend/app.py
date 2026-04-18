@@ -77,6 +77,9 @@ def create_app() -> FastAPI:
     _configure_cors(application)
     register_routers(application)
     _register_lifecycle(application)
+    # Mount demo BEFORE frontend — demo routes must take priority over
+    # the frontend SPA catch-all (/{full_path:path}).
+    _mount_demo(application)
     _mount_frontend(application)
 
     return application
@@ -142,6 +145,49 @@ def _mount_frontend(application: FastAPI) -> None:
         return FileResponse(frontend_dir / "index.html", media_type="text/html")
 
     logger.info("Frontend: serving SPA from %s", frontend_dir)
+
+
+def _mount_demo(application: FastAPI) -> None:
+    """Serve the demo frontend when present.
+
+    In frozen (PyInstaller) builds, demo files are bundled as ``demo_dist/``
+    inside ``_MEIPASS`` (i.e. ``_internal/demo_dist/``).  In dev mode we look
+    for ``demo/dist/`` relative to the project root.
+    """
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", ""))
+        demo_dir = base / "demo_dist"
+    else:
+        demo_dir = Path(__file__).resolve().parent.parent / "demo" / "dist"
+
+    if not demo_dir.is_dir():
+        return
+
+    # Mount assets subdirectory for JS/CSS/images
+    assets_dir = demo_dir / "assets"
+    if assets_dir.is_dir():
+        application.mount(
+            "/demo/assets",
+            StaticFiles(directory=str(assets_dir)),
+            name="demo-assets",
+        )
+
+    # SPA catch-all for /demo/
+    @application.get("/demo/{full_path:path}")
+    async def serve_demo_spa(full_path: str):
+        file_path = (demo_dir / full_path).resolve()
+        if full_path and file_path.is_file() and file_path.is_relative_to(demo_dir):
+            return FileResponse(file_path)
+        return FileResponse(demo_dir / "index.html", media_type="text/html")
+
+    @application.get("/demo")
+    @application.get("/demo/")
+    async def serve_demo_index():
+        return FileResponse(demo_dir / "index.html", media_type="text/html")
+
+    logger.info("Demo: serving from %s", demo_dir)
 
 
 def _get_gpu_status() -> str:

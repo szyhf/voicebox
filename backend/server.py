@@ -7,6 +7,7 @@ absolute imports instead of relative imports.
 
 import sys
 import os
+from pathlib import Path
 
 # On Windows with --noconsole (PyInstaller), sys.stdout/stderr are None.
 # They can also be broken file objects in some edge cases.
@@ -255,6 +256,11 @@ if __name__ == "__main__":
             action="store_true",
             help="Print version and exit (handled above, kept for argparse help)",
         )
+        parser.add_argument(
+            "--demo",
+            action="store_true",
+            help="Launch demo mode: auto-open browser to /demo/, bundle model path",
+        )
         args = parser.parse_args()
 
         if args.parent_pid is not None and args.parent_pid <= 0:
@@ -290,6 +296,28 @@ if __name__ == "__main__":
         logger.info("Initializing database...")
         database.init_db()
         logger.info("Database initialized successfully")
+
+        # Demo mode: set model path from exe-adjacent models/ directory
+        if args.demo:
+            if getattr(sys, "frozen", False):
+                exe_dir = Path(sys.executable).parent
+            else:
+                exe_dir = Path(__file__).resolve().parent.parent
+            models_dir = exe_dir / "models"
+            if models_dir.is_dir():
+                os.environ["VOICEBOX_MODELS_DIR"] = str(models_dir)
+                logger.info("Demo mode: using bundled models from %s", models_dir)
+            else:
+                logger.warning("Demo mode: no bundled models/ directory found at %s", models_dir)
+
+            # Auto-open browser after server is ready
+            @app.on_event("startup")
+            async def _open_demo_browser():
+                import webbrowser
+                import threading
+                url = f"http://{args.host}:{args.port}/demo/"
+                logger.info("Demo mode: opening browser at %s", url)
+                threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
 
         logger.info(f"Starting uvicorn server on {args.host}:{args.port}...")
         uvicorn.run(
