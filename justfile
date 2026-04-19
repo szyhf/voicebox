@@ -249,6 +249,7 @@ build-web:
     Set-Location "{{ web_dir }}"; bun run build
 
 # Build demo binary (onedir + demo frontend + model + zip)
+# On Windows: use F drive for temp files to avoid C drive space issues
 [unix]
 build-demo: _ensure-venv
     cd demo && bun install && bun run build
@@ -257,9 +258,14 @@ build-demo: _ensure-venv
 [windows]
 build-demo: _ensure-venv
     Set-Location "demo"; bun install; bun run build
+    # Set temp and cache directories to F drive to avoid C drive space issues
+    $env:TMP = "F:\Temp"
+    $env:TEMP = "F:\Temp"
+    $env:HUGGINGFACE_HUB_CACHE = "F:\HF_Cache"
     $env:PATH = "{{ venv_bin }};$env:PATH"; & "{{ python }}" backend/build_binary.py --demo
 
 # Build demo binary without model (smaller zip, users bring their own model)
+# On Windows: use F drive for temp files to avoid C drive space issues
 [unix]
 build-demo-lite: _ensure-venv
     cd demo && bun install && bun run build
@@ -268,6 +274,10 @@ build-demo-lite: _ensure-venv
 [windows]
 build-demo-lite: _ensure-venv
     Set-Location "demo"; bun install; bun run build
+    # Set temp and cache directories to F drive to avoid C drive space issues
+    $env:TMP = "F:\Temp"
+    $env:TEMP = "F:\Temp"
+    $env:HUGGINGFACE_HUB_CACHE = "F:\HF_Cache"
     $env:PATH = "{{ venv_bin }};$env:PATH"; & "{{ python }}" backend/build_binary.py --demo --no-model
 
 # ─── Code Quality ────────────────────────────────────────────────────

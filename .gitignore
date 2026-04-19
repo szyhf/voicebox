@@ -26,6 +26,7 @@ target/
 # IDE
 .vscode/
 .idea/
+.codebuddy/
 *.swp
 *.swo
 *~

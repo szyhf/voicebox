@@ -52,9 +52,10 @@ def build_server(cuda=False, demo=False, demo_no_model=False):
         binary_name,
     ]
 
-    # Hide console window on Windows only. On macOS/Linux the sidecar needs
-    # stdout/stderr for Tauri to capture logs.
-    if platform.system() == "Windows":
+    # Hide console window on Windows for non-demo builds.
+    # Demo builds keep the console visible so users can see logs for debugging.
+    # On macOS/Linux the sidecar needs stdout/stderr for Tauri to capture logs.
+    if platform.system() == "Windows" and not demo:
         args.append("--noconsole")
 
     # numpy 2.x / torch ABI mismatch fix: install memmove fallback for
@@ -379,7 +380,16 @@ def build_server(cuda=False, demo=False, demo_no_model=False):
             sys.exit(1)
 
     dist_dir = str(backend_dir / "dist")
-    build_dir = str(backend_dir / "build")
+    # Use F drive for build temp files to avoid C drive space issues on Windows
+    if platform.system() == "Windows":
+        import tempfile
+        build_base = Path("F:/Temp/voicebox-build")
+        build_base.mkdir(parents=True, exist_ok=True)
+        # Use a unique subdirectory for this build
+        import uuid
+        build_dir = str(build_base / str(uuid.uuid4())[:8])
+    else:
+        build_dir = str(backend_dir / "build")
 
     args.extend(
         [

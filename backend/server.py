@@ -22,10 +22,74 @@ def _is_writable(stream):
     except Exception:
         return False
 
-if not _is_writable(sys.stdout):
-    sys.stdout = open(os.devnull, 'w')
-if not _is_writable(sys.stderr):
-    sys.stderr = open(os.devnull, 'w')
+if getattr(sys, 'frozen', False):
+    # In frozen (PyInstaller) mode, write logs to both console and a log file.
+    # Demo builds use --console so the user can see output in a terminal window.
+    _exe_dir = os.path.dirname(sys.executable)
+    _log_path = os.path.join(_exe_dir, 'voicebox-startup.log')
+    _log_file = open(_log_path, 'w', encoding='utf-8')
+
+    class _TeeStream:
+        """Write to both a file and the original console stream."""
+        def __init__(self, file_stream, console_stream):
+            self._file = file_stream
+            self._console = console_stream
+        def write(self, data):
+            self._file.write(data)
+            self._file.flush()
+            if self._console is not None:
+                try:
+                    self._console.write(data)
+                    self._console.flush()
+                except Exception:
+                    pass
+        def flush(self):
+            self._file.flush()
+            if self._console is not None:
+                try:
+                    self._console.flush()
+                except Exception:
+                    pass
+        def isatty(self):
+            if self._console is not None:
+                try:
+                    return self._console.isatty()
+                except Exception:
+                    pass
+            return False
+        def fileno(self):
+            if self._console is not None:
+                try:
+                    return self._console.fileno()
+                except Exception:
+                    pass
+            raise OSError("fileno not available")
+        @property
+        def encoding(self):
+            if self._console is not None:
+                return getattr(self._console, 'encoding', 'utf-8')
+            return 'utf-8'
+        @property
+        def newlines(self):
+            if self._console is not None:
+                return getattr(self._console, 'newlines', None)
+            return None
+        @property
+        def buffer(self):
+            if self._console is not None:
+                return getattr(self._console, 'buffer', None)
+            return None
+
+    _orig_stdout = sys.stdout
+    _orig_stderr = sys.stderr
+    sys.stdout = _TeeStream(_log_file, _orig_stdout)
+    sys.stderr = _TeeStream(_log_file, _orig_stderr)
+    print(f"[{__file__}] Log started at {_log_path}", flush=True)
+else:
+    if not _is_writable(sys.stdout):
+        sys.stdout = open(os.devnull, 'w')
+    if not _is_writable(sys.stderr):
+        sys.stderr = open(os.devnull, 'w')
 
 # PyInstaller + multiprocessing: child processes re-execute the frozen binary
 # with internal arguments. freeze_support() handles this and exits early.
@@ -306,6 +370,16 @@ if __name__ == "__main__":
             models_dir = exe_dir / "models"
             if models_dir.is_dir():
                 os.environ["VOICEBOX_MODELS_DIR"] = str(models_dir)
+                # Also set HF_HUB_CACHE directly so huggingface_hub.constants
+                # picks up the new path (config.py only reads VOICEBOX_MODELS_DIR
+                # at import time, which may have already happened).
+                os.environ["HF_HUB_CACHE"] = str(models_dir)
+                # Force huggingface_hub to re-read the environment variable
+                try:
+                    from huggingface_hub import constants as hf_constants
+                    hf_constants.HF_HUB_CACHE = str(models_dir)
+                except Exception:
+                    pass
                 logger.info("Demo mode: using bundled models from %s", models_dir)
             else:
                 logger.warning("Demo mode: no bundled models/ directory found at %s", models_dir)

@@ -192,10 +192,18 @@ export default function Step1Record({ onComplete, referenceText, onReferenceText
     setError("");
     console.log("[步骤1-上传] 开始上传流程，原始 blob 大小:", (audioBlob.size / 1024).toFixed(1), "KB，类型:", audioBlob.type);
     try {
-      // 转换 webm → wav 再上传
-      const wavBlob = await convertToWav(audioBlob);
-      const file = new File([wavBlob], "recording.wav", { type: "audio/wav" });
-      console.log("[步骤1-上传] WAV 文件已创建，大小:", (file.size / 1024).toFixed(1), "KB");
+      let file: File;
+      // webm 录音需要转换为 wav；上传的音频文件直接使用
+      if (audioBlob.type === "audio/webm") {
+        const wavBlob = await convertToWav(audioBlob);
+        file = new File([wavBlob], "recording.wav", { type: "audio/wav" });
+        console.log("[步骤1-上传] WAV 文件已创建，大小:", (file.size / 1024).toFixed(1), "KB");
+      } else {
+        // 上传的文件（mp3/wav 等）直接使用原始文件名
+        const name = audioBlob instanceof File ? audioBlob.name : "audio.wav";
+        file = new File([audioBlob], name, { type: audioBlob.type });
+        console.log("[步骤1-上传] 直接使用上传文件，大小:", (file.size / 1024).toFixed(1), "KB");
+      }
       const path = await api.uploadAudio(file);
       console.log("[步骤1-上传] 上传成功，服务端路径:", path);
       setUploaded(true);
@@ -212,21 +220,10 @@ export default function Step1Record({ onComplete, referenceText, onReferenceText
     const file = e.target.files?.[0];
     if (!file) return;
     console.log("[步骤1-文件选择] 选择文件:", file.name, "大小:", (file.size / 1024).toFixed(1), "KB，类型:", file.type);
-    setLoading(true);
-    setError("");
-    try {
-      const path = await api.uploadAudio(file);
-      setAudioBlob(file);
-      setAudioUrl(URL.createObjectURL(file));
-      console.log("[步骤1-文件选择] 上传成功，服务端路径:", path);
-      setUploaded(true);
-      onComplete(file, path);
-    } catch (err) {
-      console.error("[步骤1-文件选择] 上传失败:", err);
-      setError("上传失败: " + (err as Error).message);
-    } finally {
-      setLoading(false);
-    }
+    // 与录音路径保持一致：只设置 blob 和预览 URL，不立即上传
+    // 等用户填完参考文本后点"确认并继续"再走 handleUpload() 上传
+    setAudioBlob(file);
+    setAudioUrl(URL.createObjectURL(file));
   };
 
   // 组件卸载时清理
@@ -293,7 +290,7 @@ export default function Step1Record({ onComplete, referenceText, onReferenceText
 
       {audioUrl && !recording && !uploaded && (
         <div className="space-y-4">
-          <p className="text-sm text-green-400">✓ 录音完成</p>
+          <p className="text-sm text-green-400">✓ {audioBlob?.type === "audio/webm" ? "录音完成" : "音频文件已选择"}</p>
           <audio controls src={audioUrl} className="w-full h-10" />
 
           <div>
